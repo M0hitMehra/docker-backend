@@ -16,7 +16,7 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:8080', 'https://your-frontend-domain.com'], // Replace with your frontend URL
+  origin: ['http://localhost:8080', 'https://docker-frontend-zphv.onrender.com'], // Replace with your frontend URL
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type']
 }));
