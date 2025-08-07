@@ -15,7 +15,11 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:8080', 'https://your-frontend-domain.com'], // Replace with your frontend URL
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type']
+}));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
@@ -33,6 +37,8 @@ const noteSchema = new mongoose.Schema({
   mood: { type: String, default: '😊' },
   tags: { type: [String], default: [] },
   color: { type: String, default: '#667eea' },
+  archived: { type: Boolean, default: false },
+  pinned: { type: Boolean, default: false },
 }, { timestamps: true });
 
 const Note = mongoose.model('Note', noteSchema);
@@ -40,7 +46,9 @@ const Note = mongoose.model('Note', noteSchema);
 // API Routes
 app.get('/api/notes', async (req, res) => {
   try {
-    const notes = await Note.find().sort({ createdAt: -1 });
+    const { archived } = req.query;
+    const filter = archived === 'true' ? { archived: true } : { archived: false };
+    const notes = await Note.find(filter).sort({ pinned: -1, createdAt: -1 });
     res.json(notes);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
@@ -103,6 +111,49 @@ app.put('/api/notes/:id', async (req, res) => {
       return res.status(404).json({ message: 'Note not found' });
     }
     res.json(note);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.patch('/api/notes/:id/archive', async (req, res) => {
+  try {
+    const { archived } = req.body;
+    const note = await Note.findByIdAndUpdate(
+      req.params.id,
+      { archived: archived },
+      { new: true, runValidators: true }
+    );
+    if (!note) {
+      return res.status(404).json({ message: 'Note not found' });
+    }
+    res.json(note);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.patch('/api/notes/:id/pin', async (req, res) => {
+  try {
+    const { pinned } = req.body;
+    const note = await Note.findByIdAndUpdate(
+      req.params.id,
+      { pinned: pinned },
+      { new: true, runValidators: true }
+    );
+    if (!note) {
+      return res.status(404).json({ message: 'Note not found' });
+    }
+    res.json(note);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.get('/api/notes/export', async (req, res) => {
+  try {
+    const notes = await Note.find().lean();
+    res.json(notes);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
