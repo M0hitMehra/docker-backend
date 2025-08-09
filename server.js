@@ -1,183 +1,59 @@
-import express from 'express';
-import mongoose from 'mongoose';
-import bodyParser from 'body-parser';
-import cors from 'cors';
-import dotenv from 'dotenv';
+import { createApp } from './src/app.js';
+import { database } from './src/config/database.js';
+import { config } from './src/config/environment.js';
+import { logger } from './src/utils/logger.js';
 
-// Initialize environment variables
-dotenv.config();
-
-// Constants
-const PORT = process.env.PORT || 3000;
-const MONGODB_URI = process.env.MONGODB_URI;
-
-// Create Express app
-const app = express();
-
-// Middleware
-app.use(cors({
-  origin: ['http://localhost:8080', 'https://docker-frontend-zphv.onrender.com'], // Replace with your frontend URL
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type']
-}));
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
-
-// MongoDB connection
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('✅ Connected to MongoDB', MONGODB_URI))
-  .catch((err) => console.error('❌ MongoDB connection error:', err));
-
-// Note Schema
-const noteSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  content: { type: String, required: true },
-  category: { type: String, default: 'Others' },
-  priority: { type: String, default: 'medium', enum: ['high', 'medium', 'low'] },
-  mood: { type: String, default: '😊' },
-  tags: { type: [String], default: [] },
-  color: { type: String, default: '#667eea' },
-  archived: { type: Boolean, default: false },
-  pinned: { type: Boolean, default: false },
-}, { timestamps: true });
-
-const Note = mongoose.model('Note', noteSchema);
-
-// API Routes
-app.get('/api/notes', async (req, res) => {
-  try {
-    const { archived } = req.query;
-    const filter = archived === 'true' ? { archived: true } : { archived: false };
-    const notes = await Note.find(filter).sort({ pinned: -1, createdAt: -1 });
-    res.json(notes);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+class Server {
+  constructor() {
+    this.app = createApp();
+    this.server = null;
   }
-});
 
-app.get('/api/notes/:id', async (req, res) => {
-  try {
-    const note = await Note.findById(req.params.id);
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
+  async start() {
+    try {
+      // Connect to database
+      await database.connect();
+
+      // Start server
+      this.server = this.app.listen(config.port, () => {
+        logger.info(`✅ Server running at http://localhost:${config.port}`);
+        logger.info(`🌍 Environment: ${config.nodeEnv}`);
+      });
+
+      // Graceful shutdown
+      this.setupGracefulShutdown();
+
+    } catch (error) {
+      logger.error('Failed to start server:', error);
+      process.exit(1);
     }
-    res.json(note);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
   }
-});
 
-app.post('/api/notes', async (req, res) => {
-  try {
-    const { title, content, category, priority, mood, tags, color } = req.body;
-    if (!title || !content) {
-      return res.status(400).json({ message: 'Title and content are required' });
-    }
-    const note = await Note.create({
-      title,
-      content,
-      category: category || 'Others',
-      priority: priority || 'medium',
-      mood: mood || '😊',
-      tags: tags || [],
-      color: color || '#667eea',
-    });
-    res.status(201).json(note);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+  setupGracefulShutdown() {
+    const shutdown = async (signal) => {
+      logger.info(`Received ${signal}. Starting graceful shutdown...`);
+      
+      if (this.server) {
+        this.server.close(async () => {
+          logger.info('HTTP server closed');
+          await database.disconnect();
+          logger.info('✅ Graceful shutdown completed');
+          process.exit(0);
+        });
+      }
+
+      // Force shutdown after 10 seconds
+      setTimeout(() => {
+        logger.error('❌ Forced shutdown');
+        process.exit(1);
+      }, 10000);
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
   }
-});
-
-app.put('/api/notes/:id', async (req, res) => {
-  try {
-    const { title, content, category, priority, mood, tags, color } = req.body;
-    if (!title || !content) {
-      return res.status(400).json({ message: 'Title and content are required' });
-    }
-    const note = await Note.findByIdAndUpdate(
-      req.params.id,
-      {
-        title,
-        content,
-        category: category || 'Others',
-        priority: priority || 'medium',
-        mood: mood || '😊',
-        tags: tags || [],
-        color: color || '#667eea',
-      },
-      { new: true, runValidators: true }
-    );
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    res.json(note);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-app.patch('/api/notes/:id/archive', async (req, res) => {
-  try {
-    const { archived } = req.body;
-    const note = await Note.findByIdAndUpdate(
-      req.params.id,
-      { archived: archived },
-      { new: true, runValidators: true }
-    );
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    res.json(note);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-app.patch('/api/notes/:id/pin', async (req, res) => {
-  try {
-    const { pinned } = req.body;
-    const note = await Note.findByIdAndUpdate(
-      req.params.id,
-      { pinned: pinned },
-      { new: true, runValidators: true }
-    );
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    res.json(note);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-app.get('/api/notes/export', async (req, res) => {
-  try {
-    const notes = await Note.find().lean();
-    res.json(notes);
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-app.delete('/api/notes/:id', async (req, res) => {
-  try {
-    const result = await Note.findByIdAndDelete(req.params.id);
-    if (!result) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    res.json({ message: 'Note deleted' });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('❌ Error:', err.message);
-  res.status(500).json({ message: 'Something went wrong' });
-});
+}
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
-});
+const server = new Server();
+server.start();
